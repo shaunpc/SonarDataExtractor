@@ -2,6 +2,10 @@ import requests
 import csv
 import sys
 import time
+import urllib3
+
+# Disable the InsecureRequestWarning from some servers
+urllib3.disable_warnings()
 
 #  Documentation of SONAR API
 #  https://docs.sonarqube.org/pages/viewpage.action?pageId=2392180
@@ -24,7 +28,8 @@ Maintainability = "code_smells,sqale_rating"
 Coverage = "coverage"
 Duplications = "duplicated_lines_density"
 # Further Portfolio Summary Metric Data of interest
-Portfolio = "releasability_rating,reliability_rating,security_review_rating"
+Portfolio = "releasability_rating,security_review_rating"
+# Portfolio = "new_technical_debt" << Older versions of sonar don't have releasability/sec-review
 
 # Define the header row for output file
 output_row_list = [["Type", "Name", "Key",
@@ -40,7 +45,7 @@ output_row_list = [["Type", "Name", "Key",
 # show a simple progress bar
 def progress(full, now):
     sys.stdout.write('\r')
-    sys.stdout.write("%d%% : %s" % ((now / full * 100), '=' * now))
+    sys.stdout.write("%d%%" % (now / full * 100))
     if now == full:
         sys.stdout.write('\n')
     sys.stdout.flush()
@@ -50,11 +55,14 @@ def progress(full, now):
 # call the sonar WEB API and return JSON output
 def sonar_web_api(url, parameters):
     full = url + parameters
-    resp = requests.get(full)
+    resp = requests.get(full, verify=False)
     if resp.status_code != 200:
         # This means something went wrong.
         raise Exception('GET ', parameters, ' {}'.format(resp.status_code), ' {}'.format(resp.text))
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError:
+        return resp.text
 
 
 # metrics can come back in any order - return specific value from the full metrics list
@@ -96,7 +104,6 @@ def interrogate_sonar_component_metrics(sonar_url, total, components, mode):
                       parse_metric(metrics_string, 'coverage'),
                       parse_metric(metrics_string, 'duplicated_lines_density'),
                       parse_metric(metrics_string, 'releasability_rating'),
-                      parse_metric(metrics_string, 'reliability_rating'),
                       parse_metric(metrics_string, 'security_review_rating'),
                       sonar_url]
         output_row_list.append(output_row)
@@ -105,10 +112,21 @@ def interrogate_sonar_component_metrics(sonar_url, total, components, mode):
 # pull project components, then metrics for each component from the specified sonar repository
 def interrogate_sonar_repo_projects(sonar_url):
     # TRK is Projects, VW is Portfolios)
-    projects = sonar_web_api(sonar_url, "api/components/search?qualifiers=TRK")
-    total = projects['paging']['total']
-    print("Processing {} projects from {}".format(total, sonar_url))
-    interrogate_sonar_component_metrics(sonar_url, total, projects['components'], "PROJECT")
+    version = sonar_web_api(sonar_url, "api/server/version")
+    page_size = 500
+    page = 1
+    print("Starting to obtain projects from {} (Version:{})".format(sonar_url, version))
+    while True:
+        search_qualifier = "api/components/search?qualifiers=TRK&ps={}&p={}".format(page_size, page)
+        projects = sonar_web_api(sonar_url, search_qualifier)
+        total = projects['paging']['total']
+        print("Grabbing {} projects as page {}".format(page_size, page))
+        interrogate_sonar_component_metrics(sonar_url, page_size, projects['components'], "PROJECT")
+        if page * page_size > total:
+            break
+        else:
+            page = page + 1
+    print("Completed project processing : {}".format(total))
 
 
 # pull portfolio components, then metrics for each component from the specified sonar repository
