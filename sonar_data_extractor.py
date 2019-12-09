@@ -38,8 +38,8 @@ output_row_list = [["Type", "Name", "Key",
                     "Maintainability", "Code Smells",
                     "Coverage",
                     "Duplications",
-                    "Releasability Rating", "Reliability Rating", "Security Review Rating",
-                    "Sonar Instance"]]
+                    "Releasability Rating", "Security Review Rating",
+                    "Quality Gate", "Sonar Instance"]]
 
 
 # show a simple progress bar
@@ -89,6 +89,12 @@ def interrogate_sonar_component_metrics(sonar_url, total, components, mode):
         count = progress(total, count)
         project_id = item['key']
         project_name = item['name']
+        # Get the quality gate in-use for this project
+        quality_gate_url = "api/qualitygates/get_by_project?project=" + project_id
+        quality_gate_json = sonar_web_api(sonar_url, quality_gate_url)
+        quality_gate = quality_gate_json['qualityGate']['name']
+
+        # Get the metrics for this project
         metrics_url = metrics_url_part1 + project_id + metrics_url_part2
         # print(metrics_url_full)
         metrics_json = sonar_web_api(sonar_url, metrics_url)
@@ -105,7 +111,7 @@ def interrogate_sonar_component_metrics(sonar_url, total, components, mode):
                       parse_metric(metrics_string, 'duplicated_lines_density'),
                       parse_metric(metrics_string, 'releasability_rating'),
                       parse_metric(metrics_string, 'security_review_rating'),
-                      sonar_url]
+                      quality_gate, sonar_url]
         output_row_list.append(output_row)
 
 
@@ -148,4 +154,4 @@ with open(filename, 'w', newline='') as file:
     writer = csv.writer(file)
     writer.writerows(output_row_list)
 
-    print("Finished: Processed {} results into {}".format(len(output_row_list) - 1, file.name))
+print("Finished: Processed {} results into {}".format(len(output_row_list) - 1, file.name))
