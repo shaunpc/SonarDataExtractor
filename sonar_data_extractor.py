@@ -3,6 +3,7 @@ import csv
 import sys
 import time
 import urllib3
+from datetime import datetime
 
 # Disable the InsecureRequestWarning from some servers
 urllib3.disable_warnings()
@@ -30,6 +31,8 @@ Duplications = "duplicated_lines_density"
 # Further Portfolio Summary Metric Data of interest
 Portfolio = "releasability_rating,security_review_rating"
 # Portfolio = "new_technical_debt" << Older versions of sonar don't have releasability/sec-review
+Complexity = "complexity,cognitive_complexity,class_complexity,file_complexity,function_complexity"
+Admin = "last_commit_date,ncloc,ncloc_language_distribution"
 
 # Define the header row for output file
 output_row_list = [["Type", "Name", "Key",
@@ -39,6 +42,8 @@ output_row_list = [["Type", "Name", "Key",
                     "Coverage",
                     "Duplications",
                     "Releasability Rating", "Security Review Rating",
+                    "Complexity", "Cognitive Complexity", "Class Complexity", "File Complexity", "Function Complexity",
+                    "Last Commit Date", "NC-LoC", "Languages",
                     "Quality Gate", "Sonar Instance"]]
 
 
@@ -66,9 +71,11 @@ def sonar_web_api(url, parameters):
 
 
 # metrics can come back in any order - return specific value from the full metrics list
-def parse_metric(full_list, my_metric):
+def parse_metric(full_list, my_metric, b_convert_to_date = None):
     for m in full_list:
         if my_metric == m['metric']:
+            if b_convert_to_date:
+                return datetime.fromtimestamp(float(m['value']) / 1000).strftime('%Y-%m-%d')
             return m['value']
     return 'not found'
 
@@ -83,7 +90,8 @@ def interrogate_sonar_repo(sonar_url):
 def interrogate_sonar_component_metrics(sonar_url, total, components, mode):
     metrics_url_part1 = "api/measures/component?component="
     metrics_url_part2 = "&metricKeys=" + Reliability + "," + Security + "," + \
-                        Maintainability + "," + Coverage + "," + Duplications + "," + Portfolio
+                        Maintainability + "," + Coverage + "," + Duplications + "," + Portfolio + "," + \
+                        Complexity + "," + Admin
     count = 1
     for item in components:
         count = progress(total, count)
@@ -111,6 +119,14 @@ def interrogate_sonar_component_metrics(sonar_url, total, components, mode):
                       parse_metric(metrics_string, 'duplicated_lines_density'),
                       parse_metric(metrics_string, 'releasability_rating'),
                       parse_metric(metrics_string, 'security_review_rating'),
+                      parse_metric(metrics_string, 'complexity'),
+                      parse_metric(metrics_string, 'cognitive_complexity'),
+                      parse_metric(metrics_string, 'class_complexity'),
+                      parse_metric(metrics_string, 'file_complexity'),
+                      parse_metric(metrics_string, 'function_complexity'),
+                      parse_metric(metrics_string, 'last_commit_date', True),
+                      parse_metric(metrics_string, 'ncloc'),
+                      parse_metric(metrics_string, 'ncloc_language_distribution'),
                       quality_gate, sonar_url]
         output_row_list.append(output_row)
 
@@ -126,8 +142,12 @@ def interrogate_sonar_repo_projects(sonar_url):
         search_qualifier = "api/components/search?qualifiers=TRK&ps={}&p={}".format(page_size, page)
         projects = sonar_web_api(sonar_url, search_qualifier)
         total = projects['paging']['total']
-        print("Grabbing {} projects as page {}".format(page_size, page))
-        interrogate_sonar_component_metrics(sonar_url, page_size, projects['components'], "PROJECT")
+        if (page * page_size > total):
+            remaining_page_size = total - ((page-1)*page_size)
+        else:
+            remaining_page_size = page_size
+        print("Grabbing {} projects as page {}".format(remaining_page_size, page))
+        interrogate_sonar_component_metrics(sonar_url, remaining_page_size, projects['components'], "PROJECT")
         if page * page_size > total:
             break
         else:
